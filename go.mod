@@ -3,7 +3,7 @@ module github.com/kirill-scherba/keyvalembd
 go 1.26.2
 
 require (
-	github.com/kirill-scherba/s3lite v0.0.0-00010101000000-000000000000
+	github.com/kirill-scherba/s3lite v0.1.2
 	github.com/tursodatabase/go-libsql v0.0.0-20260424063416-3051e37e6e04
 )
 
@@ -28,6 +28,3 @@ require (
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974 // indirect
 	golang.org/x/sys v0.1.0 // indirect
 )
-
-// Use local path for development — adapt to real import in production
-replace github.com/kirill-scherba/s3lite => /home/kirill/go/src/github.com/kirill-scherba/s3lite
