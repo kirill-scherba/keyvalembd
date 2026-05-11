@@ -66,12 +66,10 @@ func NewEmbedder(model, ollamaURL string) *Embedder {
 	}
 
 	if err := e.checkOllama(); err != nil {
-		fmt.Printf("⚠️  Embedding search is not available: %v\n", err)
 		e.ready = false
 		return e
 	}
 
-	fmt.Printf("✅ Embeddings ready (model: %s)\n", model)
 	e.ready = true
 	return e
 }
