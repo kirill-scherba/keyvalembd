@@ -17,6 +17,7 @@
 | docs/CONTEXT.md | docs/CONTEXT.md | ✅ Created |
 | docs/DESIGN.md | docs/DESIGN.md | ✅ Created |
 | docs/STATUS.md | docs/STATUS.md | ✅ Created |
+| Model() test + godoc | embedder.go, keyvalembd_test.go | ✅ Added (#2) |
 
 ## Known Issues & Fixes
 
@@ -30,8 +31,14 @@
 - `go vet ./...` — ✅ PASS
 - `go test ./...` — ✅ PASS (21 tests, including Ollama SearchSemantic + timestamp tests)
 
+## Current Tasks
+
+| Task | Issue | Status |
+|------|-------|--------|
+| Add test for dead code `Model()` method | [#2](https://github.com/kirill-scherba/keyvalembd/issues/2) | 🟡 In progress |
+
 ## Next Steps
 
-1. Test with in-memory libSQL (temporary file)
-2. Test with real Ollama if available
+1. Await PR review for issue #2 → merge
+2. Test with in-memory libSQL (temporary file)
 3. Integrate into memory-store-mcp

@@ -43,6 +43,12 @@ func TestKeyValueEmbd(t *testing.T) {
 		t.Log("keyvalembd created at", kv.dbPath)
 	})
 
+	t.Run("Model", func(t *testing.T) {
+		model := kv.embedder.Model()
+		require(t, "embeddinggemma:latest", model)
+		t.Log("embedding model:", model)
+	})
+
 	t.Run("Set and Get", func(t *testing.T) {
 		keys := []keyValue{
 			{"key1", []byte("value1")},
