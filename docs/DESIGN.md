@@ -15,8 +15,8 @@ CREATE TABLE kv_data (
     value        BLOB NOT NULL,
     content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
     checksum     TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    modified_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    modified_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     metadata     TEXT NOT NULL DEFAULT '{}'
 );
 
@@ -26,11 +26,15 @@ CREATE TABLE kv_embeddings (
     key        TEXT NOT NULL UNIQUE REFERENCES kv_data(key) ON DELETE CASCADE,
     text       TEXT NOT NULL DEFAULT '',
     embedding  BLOB,           -- []float32 → 4 bytes per float, little-endian
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 ```
 
 Embedding dimension: 768 (embeddinggemma model).
+
+**Timestamp format:** All `created_at` and `modified_at` columns use RFC3339
+(`"2006-01-02T15:04:05Z"`). Legacy databases may contain SQLite's `datetime('now')`
+format (`"2006-01-02 15:04:05"`); `parseTimestamp()` handles both transparently.
 
 ## Folder Semantics (S3-like)
 
