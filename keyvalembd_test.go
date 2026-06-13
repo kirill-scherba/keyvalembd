@@ -45,9 +45,7 @@ func TestKeyValueEmbd(t *testing.T) {
 
 	t.Run("Model", func(t *testing.T) {
 		model := kv.embedder.Model()
-		if model == "" {
-			t.Fatal("expected non-empty model name")
-		}
+		require(t, "embeddinggemma:latest", model)
 		t.Log("embedding model:", model)
 	})
 
