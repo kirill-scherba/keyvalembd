@@ -18,6 +18,16 @@
 | docs/CONTEXT.md | docs/CONTEXT.md | ✅ Created |
 | docs/DESIGN.md | docs/DESIGN.md | ✅ Created |
 | docs/STATUS.md | docs/STATUS.md | ✅ Created |
+| Model() test + godoc | embedder.go, keyvalembd_test.go | ✅ Added (#2) |
+
+## Known Issues & Fixes
+
+| Component | File | Status |
+|---|---|---|
+| Fix: SetInfo RFC3339 + robust parsing | info.go, keyvalembd.go, crud.go, keyvalembd_test.go | ✅ Fixed (#1) |
+| Test: Model() getter + godoc | embedder.go, keyvalembd_test.go | ✅ Fixed (#2) |
+| Fix: SearchByEmbedding ignores rows.Err() and scan errors | search.go | ✅ Fixed (#3) |
+| Fix: List ignores rows.Err() and scan errors | list.go | ✅ Fixed (#3) |
 
 ## Build Status
 
@@ -29,5 +39,4 @@
 ## Next Steps
 
 1. Test with in-memory libSQL (temporary file)
-2. Test with real Ollama if available
-3. Integrate into memory-store-mcp
+2. Integrate into memory-store-mcp

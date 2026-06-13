@@ -81,7 +81,8 @@ func (e *Embedder) Ready() bool {
 	return e.ready
 }
 
-// Model returns the current model name.
+// Model returns the current embedding model name (e.g. "embeddinggemma:latest").
+// Useful for logging or displaying which model is active.
 func (e *Embedder) Model() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

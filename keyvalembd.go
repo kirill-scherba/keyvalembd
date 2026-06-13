@@ -113,14 +113,15 @@ func (kv *KeyValueEmbd) createTables() error {
 	_, _ = kv.db.Exec("CREATE EXTENSION IF NOT EXISTS vector")
 
 	// Main key-value table with metadata
+	// NOTE: strftime(...) produces RFC3339; datetime('now') does not.
 	_, err := kv.db.Exec(`
 		CREATE TABLE IF NOT EXISTS kv_data (
 			key          TEXT PRIMARY KEY NOT NULL,
 			value        BLOB NOT NULL,
 			content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
 			checksum     TEXT NOT NULL DEFAULT '',
-			created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-			modified_at  TEXT NOT NULL DEFAULT (datetime('now')),
+			created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+			modified_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 			metadata     TEXT NOT NULL DEFAULT '{}'
 		)
 	`)
@@ -135,7 +136,7 @@ func (kv *KeyValueEmbd) createTables() error {
 			key        TEXT NOT NULL UNIQUE,
 			text       TEXT NOT NULL DEFAULT '',
 			embedding  BLOB,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 			FOREIGN KEY (key) REFERENCES kv_data(key) ON DELETE CASCADE
 		)
 	`)
@@ -146,6 +147,20 @@ func (kv *KeyValueEmbd) createTables() error {
 	return nil
 }
 
+// parseTimestamp tries RFC3339 first, then falls back to SQLite datetime
+// format ("2006-01-02 15:04:05"). Returns zero time and logs a warning if
+// neither format matches.
+func parseTimestamp(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t
+	}
+	log.Printf("⚠️  keyvalembd: unparseable timestamp: %q", s)
+	return time.Time{}
+}
+
 // makeObjectInfo fills an s3lite.ObjectInfo from a database row scan.
 func makeObjectInfo(key string, valueLen int, contentType, checksum,
 	createdAt, modifiedAt, metadataStr string) *s3lite.ObjectInfo {
@@ -153,8 +168,8 @@ func makeObjectInfo(key string, valueLen int, contentType, checksum,
 	var metadata map[string]string
 	_ = json.Unmarshal([]byte(metadataStr), &metadata)
 
-	created, _ := time.Parse(time.RFC3339, createdAt)
-	modified, _ := time.Parse(time.RFC3339, modifiedAt)
+	created := parseTimestamp(createdAt)
+	modified := parseTimestamp(modifiedAt)
 
 	info := &s3lite.ObjectInfo{
 		ContentLength: int64(valueLen),

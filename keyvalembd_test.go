@@ -43,6 +43,12 @@ func TestKeyValueEmbd(t *testing.T) {
 		t.Log("keyvalembd created at", kv.dbPath)
 	})
 
+	t.Run("Model", func(t *testing.T) {
+		model := kv.embedder.Model()
+		require(t, "embeddinggemma:latest", model)
+		t.Log("embedding model:", model)
+	})
+
 	t.Run("Set and Get", func(t *testing.T) {
 		keys := []keyValue{
 			{"key1", []byte("value1")},
@@ -301,10 +307,96 @@ func TestKeyValueEmbd(t *testing.T) {
 		t.Logf("Sequential: %d keys, %.2f ops/s", numKeys, opsPerSec)
 	})
 
+	t.Run("List when disabled", func(t *testing.T) {
+		kv.enabled = false
+		count := kv.Count("")
+		if count != 0 {
+			t.Fatalf("expected 0 entries when disabled, got %d", count)
+		}
+		kv.enabled = true
+	})
+
+	t.Run("SearchByEmbedding when disabled", func(t *testing.T) {
+		kv.enabled = false
+		_, err := kv.SearchByEmbedding([]float32{}, 5)
+		if err == nil {
+			t.Fatal("expected error when disabled")
+		}
+		kv.enabled = true
+	})
+
+	t.Run("SetInfo timestamp roundtrip", func(t *testing.T) {
+		modTime := time.Date(2026, 6, 12, 15, 30, 0, 0, time.UTC)
+		outInfo, err := kv.SetInfo("info-key", &s3lite.ObjectInfo{
+			ContentType: "text/markdown",
+			ModifiedAt:  modTime,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outInfo.ModifiedAt.IsZero() {
+			t.Fatalf("SetInfo ModifiedAt is zero, expected %v", modTime)
+		}
+		if outInfo.ModifiedAt.UTC().Format(time.RFC3339) != modTime.Format(time.RFC3339) {
+			t.Fatalf("SetInfo ModifiedAt mismatch: got %v, want %v", outInfo.ModifiedAt, modTime)
+		}
+		// Verify via GetInfo as well
+		info, err := kv.GetInfo("info-key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.ModifiedAt.IsZero() {
+			t.Fatalf("GetInfo ModifiedAt is zero after SetInfo, expected %v", modTime)
+		}
+		if info.ModifiedAt.UTC().Format(time.RFC3339) != modTime.Format(time.RFC3339) {
+			t.Fatalf("GetInfo ModifiedAt mismatch: got %v, want %v", info.ModifiedAt, modTime)
+		}
+	})
+
+	t.Run("CreatedAt not zero", func(t *testing.T) {
+		info, err := kv.GetInfo("info-key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.CreatedAt.IsZero() {
+			t.Fatal("CreatedAt is zero — format mismatch between Set and makeObjectInfo")
+		}
+	})
+
 	t.Run("Close", func(t *testing.T) {
 		kv.Close()
 		kv = nil
 	})
+}
+
+func TestParseTimestamp(t *testing.T) {
+	tests := []struct {
+		input string
+		wantZero bool
+		wantFormat string
+	}{
+		{"2026-06-12T15:30:00Z", false, time.RFC3339},
+		{"2026-06-12 15:30:00", false, "2006-01-02 15:04:05"},
+		{"not-a-date", true, ""},
+		{"", true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseTimestamp(tt.input)
+			if tt.wantZero {
+				if !got.IsZero() {
+					t.Fatalf("parseTimestamp(%q): expected zero time, got %v", tt.input, got)
+				}
+				return
+			}
+			if got.IsZero() {
+				t.Fatalf("parseTimestamp(%q): expected non-zero time", tt.input)
+			}
+			if got.Format(tt.wantFormat) == "0001-01-01T00:00:00Z" {
+				t.Fatalf("parseTimestamp(%q): unexpected zero after re-formatting", tt.input)
+			}
+		})
+	}
 }
 
 func require[T comparable](t *testing.T, expected, actual T) {

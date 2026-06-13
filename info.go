@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kirill-scherba/s3lite"
 )
@@ -57,8 +58,8 @@ func (kv *KeyValueEmbd) SetInfo(key string, objectInfo *s3lite.ObjectInfo) (
 		b, _ := json.Marshal(objectInfo.Metadata)
 		metaJSON = string(b)
 	}
-	now := objectInfo.ModifiedAt.Format("2006-01-02 15:04:05")
-	if now == "0001-01-01 00:00:00" || objectInfo.ModifiedAt.IsZero() {
+	now := objectInfo.ModifiedAt.UTC().Format(time.RFC3339)
+	if objectInfo.ModifiedAt.IsZero() {
 		// Use SQLite default for modified_at
 		_, err = kv.db.Exec(`
 			UPDATE kv_data SET
