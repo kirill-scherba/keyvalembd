@@ -24,6 +24,7 @@
 | Component | File | Status |
 |---|---|---|
 | Fix: SetInfo RFC3339 + robust parsing | info.go, keyvalembd.go, crud.go, keyvalembd_test.go | ✅ Fixed (#1) |
+| Test: Model() getter + godoc | embedder.go, keyvalembd_test.go | ✅ Fixed (#2) |
 
 ## Build Status
 
@@ -33,12 +34,9 @@
 
 ## Current Tasks
 
-| Task | Issue | Status |
-|------|-------|--------|
-| Add test for dead code `Model()` method | [#2](https://github.com/kirill-scherba/keyvalembd/issues/2) | 🟡 In progress |
+_No active tasks. Issue #2 is closed._
 
 ## Next Steps
 
-1. Await PR review for issue #2 → merge
-2. Test with in-memory libSQL (temporary file)
-3. Integrate into memory-store-mcp
+1. Test with in-memory libSQL (temporary file)
+2. Integrate into memory-store-mcp
