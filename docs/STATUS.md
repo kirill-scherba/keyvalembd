@@ -25,16 +25,14 @@
 |---|---|---|
 | Fix: SetInfo RFC3339 + robust parsing | info.go, keyvalembd.go, crud.go, keyvalembd_test.go | ✅ Fixed (#1) |
 | Test: Model() getter + godoc | embedder.go, keyvalembd_test.go | ✅ Fixed (#2) |
+| Fix: SearchByEmbedding ignores rows.Err() and scan errors | search.go | ✅ Fixed (#3) |
+| Fix: List ignores rows.Err() and scan errors | list.go | ✅ Fixed (#3) |
 
 ## Build Status
 
 - `go build ./...` — ✅ PASS
 - `go vet ./...` — ✅ PASS
-- `go test ./...` — ✅ PASS (21 tests, including Ollama SearchSemantic + timestamp tests)
-
-## Current Tasks
-
-_No active tasks. Issue #2 is closed._
+- `go test ./...` — ✅ PASS (23 tests, including Ollama SearchSemantic + timestamp + rows.Err tests)
 
 ## Next Steps
 
