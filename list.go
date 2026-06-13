@@ -6,6 +6,7 @@ package keyvalembd
 
 import (
 	"iter"
+	"log"
 	"path/filepath"
 	"strings"
 )
@@ -27,6 +28,7 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 			likePattern,
 		)
 		if err != nil {
+			log.Printf("keyvalembd: List: query keys: %v", err)
 			return
 		}
 		defer rows.Close()
@@ -41,6 +43,7 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 		for rows.Next() {
 			var key string
 			if err := rows.Scan(&key); err != nil {
+				log.Printf("keyvalembd: List: scan row: %v", err)
 				continue
 			}
 
@@ -64,6 +67,10 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 			if !yield(key) {
 				return
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("keyvalembd: List: iterate rows: %v", err)
+			return
 		}
 	}
 }
