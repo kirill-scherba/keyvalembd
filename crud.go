@@ -104,7 +104,7 @@ func (kv *KeyValueEmbd) SetWithEmbedding(key string, value []byte,
 		embBytes := float32SliceToBytes(emb)
 		_, err = kv.db.Exec(`
 			INSERT INTO kv_embeddings (key, text, embedding, created_at)
-			VALUES (?, ?, ?, datetime('now'))
+			VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 			ON CONFLICT(key) DO UPDATE SET
 				text = excluded.text,
 				embedding = excluded.embedding

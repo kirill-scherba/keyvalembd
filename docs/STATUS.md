@@ -18,11 +18,17 @@
 | docs/DESIGN.md | docs/DESIGN.md | ✅ Created |
 | docs/STATUS.md | docs/STATUS.md | ✅ Created |
 
+## Known Issues & Fixes
+
+| Component | File | Status |
+|---|---|---|
+| Fix: SetInfo RFC3339 + robust parsing | info.go, keyvalembd.go, crud.go, keyvalembd_test.go | ✅ Fixed (#1) |
+
 ## Build Status
 
 - `go build ./...` — ✅ PASS
 - `go vet ./...` — ✅ PASS
-- `go test ./...` — ✅ PASS (18 tests, 0.225s, including real Ollama SearchSemantic)
+- `go test ./...` — ✅ PASS (21 tests, including Ollama SearchSemantic + timestamp tests)
 
 ## Next Steps
 
