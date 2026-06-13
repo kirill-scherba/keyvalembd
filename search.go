@@ -6,6 +6,7 @@ package keyvalembd
 
 import (
 	"fmt"
+	"log"
 	"sort"
 )
 
@@ -74,6 +75,7 @@ func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]Sea
 			embBlob  []byte
 		)
 		if err := rows.Scan(&key, &text, &embBlob); err != nil {
+			log.Printf("keyvalembd: SearchByEmbedding: scan row: %v", err)
 			continue
 		}
 
@@ -84,6 +86,9 @@ func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]Sea
 			text:  text,
 			score: score,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate embeddings: %w", err)
 	}
 
 	// Sort by score descending
