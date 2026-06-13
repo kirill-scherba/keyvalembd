@@ -121,7 +121,7 @@ func (e *Embedder) checkOllama() error {
 
 const maxEmbeddingRetries = 3
 
-func retryDelay(attempt int) time.Duration {
+var retryDelay = func(attempt int) time.Duration {
 	return time.Duration(1<<(attempt-1)) * time.Second
 }
 

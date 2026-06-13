@@ -14,6 +14,7 @@
 | Embedder | embedder.go | ✅ Created |
 | SearchSemantic/SearchByEmbedding | search.go | ✅ Created |
 | Тесты | keyvalembd_test.go | ✅ Created |
+| Retry tests | embedder_test.go | ✅ Created |
 | docs/CONTEXT.md | docs/CONTEXT.md | ✅ Created |
 | docs/DESIGN.md | docs/DESIGN.md | ✅ Created |
 | docs/STATUS.md | docs/STATUS.md | ✅ Created |
@@ -22,7 +23,8 @@
 
 - `go build ./...` — ✅ PASS
 - `go vet ./...` — ✅ PASS
-- `go test ./...` — ✅ PASS (18 tests, 0.225s, including real Ollama SearchSemantic)
+- `go test ./...` — ✅ PASS (31 tests, 0.228s, including real Ollama SearchSemantic)
+- Coverage: `GenerateEmbedding` 93.2%, `retryDelay` 100%
 
 ## Next Steps
 
