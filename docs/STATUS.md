@@ -22,10 +22,13 @@
 
 - `go build ./...` — ✅ PASS
 - `go vet ./...` — ✅ PASS
-- `go test ./...` — ✅ PASS (18 tests, 0.225s, including real Ollama SearchSemantic)
+- `go test ./...` — ✅ PASS (20 tests, including real Ollama SearchSemantic)
+
+## Known Issues (Fixed)
+
+- ~~`search.go` — `SearchByEmbedding` silently ignores `rows.Err()` and scan errors (issue #3)~~ ✅ Fixed in PR
+- ~~`list.go` — `List` silently ignores `rows.Err()` and scan errors (same pattern)~~ ✅ Fixed in PR
 
 ## Next Steps
 
-1. Test with in-memory libSQL (temporary file)
-2. Test with real Ollama if available
-3. Integrate into memory-store-mcp
+1. Integrate into memory-store-mcp
