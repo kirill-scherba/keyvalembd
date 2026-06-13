@@ -301,6 +301,24 @@ func TestKeyValueEmbd(t *testing.T) {
 		t.Logf("Sequential: %d keys, %.2f ops/s", numKeys, opsPerSec)
 	})
 
+	t.Run("List when disabled", func(t *testing.T) {
+		kv.enabled = false
+		count := kv.Count("")
+		if count != 0 {
+			t.Fatalf("expected 0 entries when disabled, got %d", count)
+		}
+		kv.enabled = true
+	})
+
+	t.Run("SearchByEmbedding when disabled", func(t *testing.T) {
+		kv.enabled = false
+		_, err := kv.SearchByEmbedding([]float32{}, 5)
+		if err == nil {
+			t.Fatal("expected error when disabled")
+		}
+		kv.enabled = true
+	})
+
 	t.Run("Close", func(t *testing.T) {
 		kv.Close()
 		kv = nil
