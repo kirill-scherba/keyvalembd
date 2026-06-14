@@ -20,7 +20,19 @@ func (kv *KeyValueEmbd) GetInfo(key string) (objectInfo *s3lite.ObjectInfo, err 
 		return nil, fmt.Errorf("keyvalembd is not enabled")
 	}
 
-	row, err := sqlh.Get[KVData](kv.db, sqlh.Eq("key", key))
+	// Use a narrow projection to avoid reading the value BLOB for metadata-only
+	// requests.
+	type kvDataInfo struct {
+		_           bool   `db_table_name:"kv_data"`
+		ValueLen    int    `db:"length(value)"`
+		ContentType string `db:"content_type"`
+		Checksum    string `db:"checksum"`
+		CreatedAt   string `db:"created_at"`
+		ModifiedAt  string `db:"modified_at"`
+		Metadata    string `db:"metadata"`
+	}
+
+	row, err := sqlh.Get[kvDataInfo](kv.db, sqlh.Eq("key", key))
 	if err == sql.ErrNoRows {
 		return nil, s3lite.ErrKeyNotFound
 	}
@@ -28,7 +40,7 @@ func (kv *KeyValueEmbd) GetInfo(key string) (objectInfo *s3lite.ObjectInfo, err 
 		return nil, fmt.Errorf("get info for %s: %w", key, err)
 	}
 
-	objectInfo = makeObjectInfo(key, len(row.Value), row.ContentType,
+	objectInfo = makeObjectInfo(key, row.ValueLen, row.ContentType,
 		row.Checksum, row.CreatedAt, row.ModifiedAt, row.Metadata)
 	return objectInfo, nil
 }
