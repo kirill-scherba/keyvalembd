@@ -135,7 +135,7 @@ func (kv *KeyValueEmbd) Close() {
 
 // createTables creates the required database tables if they do not exist.
 func (kv *KeyValueEmbd) createTables() error {
-	// Enable vector extension (best-effort)
+	// Try to enable libSQL vector extension; non-fatal if unsupported.
 	_, _ = kv.db.Exec("CREATE EXTENSION IF NOT EXISTS vector")
 
 	// Create tables from struct definitions via sqlh
@@ -168,7 +168,9 @@ func makeObjectInfo(key string, valueLen int, contentType, checksum,
 	createdAt, modifiedAt, metadataStr string) *s3lite.ObjectInfo {
 
 	var metadata map[string]string
-	_ = json.Unmarshal([]byte(metadataStr), &metadata)
+	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+		log.Printf("keyvalembd: unmarshal metadata for key %q: %v", key, err)
+	}
 
 	created := parseTimestamp(createdAt)
 	modified := parseTimestamp(modifiedAt)

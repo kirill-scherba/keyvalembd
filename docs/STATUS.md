@@ -28,6 +28,7 @@
 | Test: Model() getter + godoc | embedder.go, keyvalembd_test.go | ✅ Fixed (#2) |
 | Fix: SearchByEmbedding ignores rows.Err() and scan errors | search.go | ✅ Fixed (#3) |
 | Fix: List ignores rows.Err() and scan errors | list.go | ✅ Fixed (#3) |
+| Fix: Silently swallowed errors in marshal/unmarshal and error logging | crud.go, info.go, keyvalembd.go, embedder.go | ✅ Fixed (#5) |
 
 ## Build Status
 
