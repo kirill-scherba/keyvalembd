@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	github.com/kirill-scherba/s3lite v0.1.2
+	github.com/kirill-scherba/sqlh v0.8.1
 	github.com/tursodatabase/go-libsql v0.0.0-20260424063416-3051e37e6e04
 )
 

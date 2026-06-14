@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kirill-scherba/s3lite"
+	"github.com/kirill-scherba/sqlh"
 )
 
 // GetInfo retrieves object info (metadata) by key.
@@ -19,15 +20,7 @@ func (kv *KeyValueEmbd) GetInfo(key string) (objectInfo *s3lite.ObjectInfo, err 
 		return nil, fmt.Errorf("keyvalembd is not enabled")
 	}
 
-	var (
-		contentType, checksum, createdAt, modifiedAt, metadataStr string
-		valLen                                                   int
-	)
-	err = kv.db.QueryRow(`
-		SELECT length(value), content_type, checksum, created_at, modified_at, metadata
-		FROM kv_data WHERE key = ?
-	`, key).Scan(&valLen, &contentType, &checksum, &createdAt, &modifiedAt, &metadataStr)
-
+	row, err := sqlh.Get[KVData](kv.db, sqlh.Eq("key", key))
 	if err == sql.ErrNoRows {
 		return nil, s3lite.ErrKeyNotFound
 	}
@@ -35,8 +28,8 @@ func (kv *KeyValueEmbd) GetInfo(key string) (objectInfo *s3lite.ObjectInfo, err 
 		return nil, fmt.Errorf("get info for %s: %w", key, err)
 	}
 
-	objectInfo = makeObjectInfo(key, valLen, contentType, checksum,
-		createdAt, modifiedAt, metadataStr)
+	objectInfo = makeObjectInfo(key, len(row.Value), row.ContentType,
+		row.Checksum, row.CreatedAt, row.ModifiedAt, row.Metadata)
 	return objectInfo, nil
 }
 

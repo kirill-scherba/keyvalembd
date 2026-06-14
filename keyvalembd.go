@@ -24,6 +24,7 @@ import (
 	_ "github.com/tursodatabase/go-libsql"
 
 	"github.com/kirill-scherba/s3lite"
+	"github.com/kirill-scherba/sqlh"
 )
 
 // KeyValueEmbd is an S3-like key-value store backed by libSQL with optional
@@ -100,6 +101,31 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 	return kv, nil
 }
 
+// KVData represents the kv_data table row with sqlh struct tags.
+// The table stores key-value pairs with S3-like metadata.
+type KVData struct {
+	_           bool   `db_table_name:"kv_data"`
+	Key         string `db:"key" db_key:"primary key"`
+	Value       []byte `db:"value" db_type:"BLOB"`
+	ContentType string `db:"content_type"`
+	Checksum    string `db:"checksum"`
+	CreatedAt   string `db:"created_at"`
+	ModifiedAt  string `db:"modified_at"`
+	Metadata    string `db:"metadata"`
+}
+
+// KVEmbedding represents the kv_embeddings table row with sqlh struct tags.
+// Stores embedding vectors for semantic search.
+type KVEmbedding struct {
+	_          bool   `db_table_name:"kv_embeddings"`
+	ID         int64  `db:"id" db_key:"primary key autoincrement"`
+	Key        string `db:"key" db_key:"unique"`
+	Text       string `db:"text"`
+	Embedding  []byte `db:"embedding" db_type:"BLOB"`
+	CreatedAt  string `db:"created_at"`
+	_          string `db:"-" db_key:"CONSTRAINT kv_embeddings_ibfk_1 FOREIGN KEY (key) REFERENCES kv_data(key) ON DELETE CASCADE"`
+}
+
 // Close closes the database connection and releases resources.
 func (kv *KeyValueEmbd) Close() {
 	if kv.db != nil {
@@ -112,35 +138,11 @@ func (kv *KeyValueEmbd) createTables() error {
 	// Enable vector extension (best-effort)
 	_, _ = kv.db.Exec("CREATE EXTENSION IF NOT EXISTS vector")
 
-	// Main key-value table with metadata
-	// NOTE: strftime(...) produces RFC3339; datetime('now') does not.
-	_, err := kv.db.Exec(`
-		CREATE TABLE IF NOT EXISTS kv_data (
-			key          TEXT PRIMARY KEY NOT NULL,
-			value        BLOB NOT NULL,
-			content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
-			checksum     TEXT NOT NULL DEFAULT '',
-			created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-			modified_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-			metadata     TEXT NOT NULL DEFAULT '{}'
-		)
-	`)
-	if err != nil {
+	// Create tables from struct definitions via sqlh
+	if err := sqlh.Create[KVData](kv.db); err != nil {
 		return fmt.Errorf("create kv_data table: %w", err)
 	}
-
-	// Embeddings table
-	_, err = kv.db.Exec(`
-		CREATE TABLE IF NOT EXISTS kv_embeddings (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			key        TEXT NOT NULL UNIQUE,
-			text       TEXT NOT NULL DEFAULT '',
-			embedding  BLOB,
-			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-			FOREIGN KEY (key) REFERENCES kv_data(key) ON DELETE CASCADE
-		)
-	`)
-	if err != nil {
+	if err := sqlh.Create[KVEmbedding](kv.db); err != nil {
 		return fmt.Errorf("create kv_embeddings table: %w", err)
 	}
 

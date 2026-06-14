@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kirill-scherba/s3lite"
+	"github.com/kirill-scherba/sqlh"
 )
 
 // Get retrieves a value by its key from the database.
@@ -18,12 +19,14 @@ func (kv *KeyValueEmbd) Get(key string) (value []byte, err error) {
 	if !kv.enabled {
 		return nil, fmt.Errorf("keyvalembd is not enabled")
 	}
-	row := kv.db.QueryRow("SELECT value FROM kv_data WHERE key = ?", key)
-	err = row.Scan(&value)
+	row, err := sqlh.Get[KVData](kv.db, sqlh.Eq("key", key))
 	if err == sql.ErrNoRows {
 		return nil, s3lite.ErrKeyNotFound
 	}
-	return
+	if err != nil {
+		return nil, fmt.Errorf("get key %s: %w", key, err)
+	}
+	return row.Value, nil
 }
 
 // Set sets a key-value pair. Optionally accepts ObjectInfo for setting
@@ -125,8 +128,7 @@ func (kv *KeyValueEmbd) Del(keys ...string) (err error) {
 	}
 
 	for _, key := range keys {
-		_, err = kv.db.Exec("DELETE FROM kv_data WHERE key = ?", key)
-		if err != nil {
+		if err := sqlh.Delete[KVData](kv.db, sqlh.Eq("key", key)); err != nil {
 			return fmt.Errorf("delete key %s: %w", key, err)
 		}
 	}
