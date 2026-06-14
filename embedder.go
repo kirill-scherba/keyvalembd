@@ -157,7 +157,7 @@ func (e *Embedder) GenerateEmbedding(text string) ([]float32, error) {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(resp.Body)
+			respBody, _ := io.ReadAll(resp.Body) // Best-effort: partial read still produces a useful error message
 			resp.Body.Close()
 			lastErr = fmt.Errorf("Ollama returned error %d: %s",
 				resp.StatusCode, string(respBody))

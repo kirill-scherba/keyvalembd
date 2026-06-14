@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/kirill-scherba/s3lite"
@@ -51,7 +52,11 @@ func (kv *KeyValueEmbd) Set(key string, value []byte, info ...*s3lite.ObjectInfo
 	}
 
 	checksum := computeChecksum(value)
-	metaJSON, _ := json.Marshal(metaMap)
+	metaJSON, err := json.Marshal(metaMap)
+	if err != nil {
+		log.Printf("keyvalembd: Set: marshal metadata: %v", err)
+		metaJSON = []byte("{}")
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Upsert: insert or update

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/kirill-scherba/s3lite"
@@ -60,8 +61,12 @@ func (kv *KeyValueEmbd) SetInfo(key string, objectInfo *s3lite.ObjectInfo) (
 	}
 	metaJSON := "{}"
 	if objectInfo.Metadata != nil {
-		b, _ := json.Marshal(objectInfo.Metadata)
-		metaJSON = string(b)
+		b, err := json.Marshal(objectInfo.Metadata)
+		if err != nil {
+			log.Printf("keyvalembd: SetInfo: marshal metadata: %v", err)
+		} else {
+			metaJSON = string(b)
+		}
 	}
 	now := objectInfo.ModifiedAt.UTC().Format(time.RFC3339)
 	if objectInfo.ModifiedAt.IsZero() {
