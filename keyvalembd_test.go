@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kirill-scherba/s3lite"
+	"github.com/kirill-scherba/sqlh"
 )
 
 func TestKeyValueEmbd(t *testing.T) {
@@ -254,10 +255,7 @@ func TestKeyValueEmbd(t *testing.T) {
 			info.Checksum, kv.embedder.Ready())
 
 		if kv.embedder.Ready() {
-			var count int
-			err := kv.db.QueryRow(
-				"SELECT COUNT(*) FROM kv_embeddings WHERE key = ?",
-				"emb-key").Scan(&count)
+			count, err := sqlh.Count[KVEmbedding](kv.db, sqlh.Eq("key", "emb-key"))
 			if err != nil {
 				t.Fatal(err)
 			}

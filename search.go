@@ -5,9 +5,12 @@
 package keyvalembd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sort"
+
+	"github.com/kirill-scherba/sqlh"
 )
 
 // SearchResult represents a single result from a semantic search.
@@ -40,6 +43,15 @@ func (kv *KeyValueEmbd) SearchSemantic(query string, limit int) ([]SearchResult,
 	return kv.SearchByEmbedding(queryEmb, limit)
 }
 
+// kvEmbeddingRow is a lightweight projection of KVEmbedding used by
+// SearchByEmbedding to load only key, text and embedding blob.
+type kvEmbeddingRow struct {
+	_         bool   `db_table_name:"kv_embeddings"`
+	Key       string `db:"key"`
+	Text      string `db:"text"`
+	Embedding []byte `db:"embedding" db_type:"BLOB"`
+}
+
 // SearchByEmbedding performs a cosine similarity search using the given
 // embedding vector against all stored embeddings, returning the top-N results.
 func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]SearchResult, error) {
@@ -50,17 +62,6 @@ func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]Sea
 		limit = 10
 	}
 
-	// Fetch all stored embeddings
-	rows, err := kv.db.Query(`
-		SELECT key, text, embedding
-		FROM kv_embeddings
-		WHERE embedding IS NOT NULL
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query embeddings: %w", err)
-	}
-	defer rows.Close()
-
 	type scored struct {
 		key   string
 		text  string
@@ -68,27 +69,20 @@ func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]Sea
 	}
 
 	var scoredResults []scored
-	for rows.Next() {
-		var (
-			key      string
-			text     string
-			embBlob  []byte
-		)
-		if err := rows.Scan(&key, &text, &embBlob); err != nil {
-			log.Printf("keyvalembd: SearchByEmbedding: scan row: %v", err)
-			continue
-		}
 
-		storedEmb := bytesToFloat32Slice(embBlob)
+	for _, row := range sqlh.ListRange[kvEmbeddingRow](
+		kv.db, 0, "", "", 0,
+		sqlh.IsNotNull("embedding"),
+		func(err error) { log.Printf("keyvalembd: SearchByEmbedding: iterate: %v", err) },
+		context.Background(),
+	) {
+		storedEmb := bytesToFloat32Slice(row.Embedding)
 		score := cosineSimilarity(embedding, storedEmb)
 		scoredResults = append(scoredResults, scored{
-			key:   key,
-			text:  text,
+			key:   row.Key,
+			text:  row.Text,
 			score: score,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate embeddings: %w", err)
 	}
 
 	// Sort by score descending

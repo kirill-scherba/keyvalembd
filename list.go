@@ -5,11 +5,21 @@
 package keyvalembd
 
 import (
+	"context"
 	"iter"
 	"log"
 	"path/filepath"
 	"strings"
+
+	"github.com/kirill-scherba/sqlh"
 )
+
+// kvDataKey is a lightweight projection of KVData used by List to avoid
+// loading the BLOB value column when only keys are needed.
+type kvDataKey struct {
+	_   bool   `db_table_name:"kv_data"`
+	Key string `db:"key"`
+}
 
 // List returns an iterator over all keys with the given prefix. Folder
 // semantics mimic S3: keys are grouped by directory depth relative to the
@@ -20,18 +30,7 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 			return
 		}
 
-		// Build LIKE pattern: prefix || '%'
 		likePattern := prefix + "%"
-
-		rows, err := kv.db.Query(
-			"SELECT key FROM kv_data WHERE key LIKE ? ORDER BY key",
-			likePattern,
-		)
-		if err != nil {
-			log.Printf("keyvalembd: List: query keys: %v", err)
-			return
-		}
-		defer rows.Close()
 
 		numFoldersInPrefix := strings.Count(prefix, "/")
 		if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
@@ -40,12 +39,13 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 
 		subfolders := make(map[string]struct{})
 
-		for rows.Next() {
-			var key string
-			if err := rows.Scan(&key); err != nil {
-				log.Printf("keyvalembd: List: scan row: %v", err)
-				continue
-			}
+		for _, row := range sqlh.ListRange[kvDataKey](
+			kv.db, 0, "", "key ASC", 0,
+			sqlh.Like("key", likePattern),
+			func(err error) { log.Printf("keyvalembd: List: iterate: %v", err) },
+			context.Background(),
+		) {
+			key := row.Key
 
 			// Skip self-folder
 			if key == prefix || key == prefix+"/" {
@@ -67,10 +67,6 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 			if !yield(key) {
 				return
 			}
-		}
-		if err := rows.Err(); err != nil {
-			log.Printf("keyvalembd: List: iterate rows: %v", err)
-			return
 		}
 	}
 }
