@@ -10,6 +10,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kirill-scherba/sqlh"
 )
@@ -21,10 +22,33 @@ type kvDataKey struct {
 	Key string `db:"key"`
 }
 
+// ListOption configures optional filtering in List.
+type ListOption func(*listOptions)
+
+type listOptions struct {
+	dateFrom string
+	dateTo   string
+}
+
+// ListWithDateFrom filters keys created at or after the given time.
+func ListWithDateFrom(t time.Time) ListOption {
+	return func(o *listOptions) {
+		o.dateFrom = t.UTC().Format("2006-01-02T15:04:05Z")
+	}
+}
+
+// ListWithDateTo filters keys created at or before the given time.
+func ListWithDateTo(t time.Time) ListOption {
+	return func(o *listOptions) {
+		o.dateTo = t.UTC().Format("2006-01-02T15:04:05Z")
+	}
+}
+
 // List returns an iterator over all keys with the given prefix. Folder
 // semantics mimic S3: keys are grouped by directory depth relative to the
 // prefix, and sub-folders appear as single entries (trailing slash).
-func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
+// Optional ListOption arguments filter by created_at range.
+func (kv *KeyValueEmbd) List(prefix string, opts ...ListOption) iter.Seq[string] {
 	return func(yield func(key string) bool) {
 		if !kv.enabled {
 			return
@@ -37,13 +61,31 @@ func (kv *KeyValueEmbd) List(prefix string) iter.Seq[string] {
 			numFoldersInPrefix++
 		}
 
+		// Apply options
+		var o listOptions
+		for _, opt := range opts {
+			opt(&o)
+		}
+
+		// Build conditions for sqlh.ListRange.
+		// Order: filter attrs first, then error func, then context.
+		conds := []any{sqlh.Like("key", likePattern)}
+		if o.dateFrom != "" {
+			conds = append(conds, sqlh.Gte("created_at", o.dateFrom))
+		}
+		if o.dateTo != "" {
+			conds = append(conds, sqlh.Lte("created_at", o.dateTo))
+		}
+		conds = append(conds,
+			func(err error) { log.Printf("keyvalembd: List: iterate: %v", err) },
+			context.Background(),
+		)
+
 		subfolders := make(map[string]struct{})
 
 		for _, row := range sqlh.ListRange[kvDataKey](
 			kv.db, 0, "", "key ASC", 0,
-			sqlh.Like("key", likePattern),
-			func(err error) { log.Printf("keyvalembd: List: iterate: %v", err) },
-			context.Background(),
+			conds...,
 		) {
 			key := row.Key
 
