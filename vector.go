@@ -158,6 +158,13 @@ func (kv *KeyValueEmbd) refreshVectorIndexState() {
 		log.Printf("keyvalembd: detect vector index: %v", err)
 	}
 
+	// Publish the column state first: countEmbeddings resolves the column via
+	// vectorColumn(), so it must not run before vecColumnOK is up to date.
+	kv.vecMu.Lock()
+	kv.vecColumnOK = columnOK
+	kv.vecIndexOK = indexOK
+	kv.vecMu.Unlock()
+
 	count := 0
 	if columnOK {
 		if n, err := kv.countEmbeddings(); err != nil {
@@ -168,8 +175,6 @@ func (kv *KeyValueEmbd) refreshVectorIndexState() {
 	}
 
 	kv.vecMu.Lock()
-	kv.vecColumnOK = columnOK
-	kv.vecIndexOK = indexOK
 	kv.vecCount = count
 	kv.vecCountAt = time.Now()
 	kv.vecMu.Unlock()

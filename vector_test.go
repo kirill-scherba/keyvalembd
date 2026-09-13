@@ -395,6 +395,35 @@ func TestDropLegacyEmbeddingColumnNoop(t *testing.T) {
 	}
 }
 
+// TestStartupCountUsesVectorColumn guards against resolving the vector column
+// before the column state is published: the startup count used to run against
+// the legacy embedding column, fail, and leave the cached count at zero (which
+// silently disabled the index for the first count-TTL window).
+func TestStartupCountUsesVectorColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "startup.db")
+
+	kv, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	insertSynthetic(t, kv, "a", randomVector(rand.New(rand.NewSource(3)), testDim))
+	kv.Close()
+
+	reopened, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(reopened.Close)
+
+	reopened.vecMu.RLock()
+	count := reopened.vecCount
+	reopened.vecMu.RUnlock()
+
+	if count != 1 {
+		t.Fatalf("startup embedding count = %d, want 1", count)
+	}
+}
+
 // keyName returns a stable key name for the i-th synthetic entry.
 func keyName(i int) string {
 	return "test/key/" + pad(i)
