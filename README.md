@@ -152,6 +152,8 @@ falls back to an exact scan. See [docs/DESIGN.md](docs/DESIGN.md) for details.
 | `VectorIndexReady() bool` | Report whether the vector column and index are present and enabled |
 | `SetVectorIndexConfig(cfg VectorIndexConfig)` | Configure enabled/threshold/oversample (defaults: enabled, 1500, 3x) |
 | `VectorIndexConfig() VectorIndexConfig` | Return the current configuration |
+| `DropLegacyEmbeddingColumn() (bool, error)` | Remove the redundant legacy `embedding` column once `embedding_vec` exists |
+| `Vacuum() error` | Rebuild the database file, reclaiming space freed by deletions |
 
 ```go
 // One-off migration (explicit because the index build can take minutes).

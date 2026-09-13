@@ -21,6 +21,8 @@
 | Model() test + godoc | embedder.go, keyvalembd_test.go | ✅ Added (#2) |
 | Native vector index (migration + ANN search) | vector.go | ✅ Added (v0.4.0) |
 | Vector index tests | vector_test.go | ✅ Added (v0.4.0) |
+| Single vector column (embedding_vec) + DropLegacyEmbeddingColumn + Vacuum | keyvalembd.go, vector.go, crud.go, search.go | ✅ Added (v0.5.0) |
+| Fix: startup embedding count used the stale column | vector.go | ✅ Fixed (v0.5.1) |
 
 ## Known Issues & Fixes
 
