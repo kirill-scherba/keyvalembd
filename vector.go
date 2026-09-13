@@ -99,7 +99,7 @@ func (kv *KeyValueEmbd) searchByEmbeddingIndex(embedding []float32, limit int) (
 	if kv.idx != nil && !kv.idxDirty {
 		hits := kv.idx.Search(embedding, limit)
 		kv.vecMu.RUnlock()
-		return hitsToResults(hits), nil
+		return kv.resultsWithText(hitsToResults(hits)), nil
 	}
 	kv.vecMu.RUnlock()
 
@@ -112,7 +112,7 @@ func (kv *KeyValueEmbd) searchByEmbeddingIndex(embedding []float32, limit int) (
 		}
 	}
 	hits := kv.idx.Search(embedding, limit)
-	return hitsToResults(hits), nil
+	return kv.resultsWithText(hitsToResults(hits)), nil
 }
 
 // buildIndexLocked rebuilds the on-disk index from the database and reopens it.
@@ -164,6 +164,53 @@ func (kv *KeyValueEmbd) buildIndexLocked() error {
 	log.Printf("keyvalembd: vector index ready: %d vectors, %.1f MB",
 		ix.Count(), float64(ix.DiskBytes())/(1<<20))
 	return nil
+}
+
+// resultsWithText fills SearchResult.Text from kv_embeddings. The in-process
+// index stores only key and vector; the text that produced the embedding lives
+// in the database. This is one small indexed lookup for the top-K keys, not a
+// scan.
+func (kv *KeyValueEmbd) resultsWithText(results []SearchResult) []SearchResult {
+	if len(results) == 0 {
+		return results
+	}
+
+	args := make([]any, len(results))
+	placeholders := make([]byte, 0, len(results)*2)
+	for i, r := range results {
+		if i > 0 {
+			placeholders = append(placeholders, ',')
+		}
+		placeholders = append(placeholders, '?')
+		args[i] = r.Key
+	}
+
+	rows, err := kv.db.Query(
+		`SELECT key, text FROM `+vectorTableName+
+			` WHERE key IN (`+string(placeholders)+`)`, args...)
+	if err != nil {
+		log.Printf("keyvalembd: read result text: %v", err)
+		return results
+	}
+	defer rows.Close()
+
+	texts := make(map[string]string, len(results))
+	for rows.Next() {
+		var key, text string
+		if err := rows.Scan(&key, &text); err != nil {
+			log.Printf("keyvalembd: scan result text: %v", err)
+			continue
+		}
+		texts[key] = text
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("keyvalembd: iterate result text: %v", err)
+	}
+
+	for i := range results {
+		results[i].Text = texts[results[i].Key]
+	}
+	return results
 }
 
 // hitsToResults converts index hits to SearchResults.

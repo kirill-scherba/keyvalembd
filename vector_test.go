@@ -165,6 +165,29 @@ func TestVectorIndexDeleteRebuilds(t *testing.T) {
 	}
 }
 
+// TestVectorIndexReturnsText guards against the index path dropping
+// SearchResult.Text: the index stores only key and vector, so the text has to
+// be read back from the database.
+func TestVectorIndexReturnsText(t *testing.T) {
+	kv := newTestKVWithIndex(t)
+
+	vec := make([]float32, testDim)
+	vec[0] = 1
+	insertSynthetic(t, kv, "with-text", vec)
+
+	hits, err := kv.searchByEmbeddingIndex(vec, 1)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit, got %d", len(hits))
+	}
+	// insertSynthetic stores the key as the embedding text.
+	if hits[0].Text != "with-text" {
+		t.Fatalf("Text = %q, want %q", hits[0].Text, "with-text")
+	}
+}
+
 func TestVectorIndexDisabled(t *testing.T) {
 	kv := newTestKV(t)
 
