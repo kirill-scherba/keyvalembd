@@ -110,13 +110,38 @@ func (kv *KeyValueEmbd) SetWithEmbedding(key string, value []byte,
 		}
 
 		embBytes := float32SliceToBytes(emb)
-		_, err = kv.db.Exec(`
-			INSERT INTO kv_embeddings (key, text, embedding, created_at)
-			VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-			ON CONFLICT(key) DO UPDATE SET
-				text = excluded.text,
-				embedding = excluded.embedding
-		`, key, text, embBytes)
+
+		// Keep the native vector index column in sync when it exists.
+		kv.vecMu.RLock()
+		hasVectorColumn := kv.vecColumnOK
+		kv.vecMu.RUnlock()
+
+		if hasVectorColumn {
+			_, err = kv.db.Exec(`
+				INSERT INTO kv_embeddings (key, text, embedding, embedding_vec, created_at)
+				VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+				ON CONFLICT(key) DO UPDATE SET
+					text = excluded.text,
+					embedding = excluded.embedding,
+					embedding_vec = excluded.embedding_vec
+			`, key, text, embBytes, embBytes)
+			if err != nil {
+				// Dimension mismatch (model changed) or index problem: fall
+				// back to storing the raw embedding only, so the value is
+				// never lost.
+				log.Printf("keyvalembd: vector column write failed, storing raw embedding only: %v", err)
+				hasVectorColumn = false
+			}
+		}
+		if !hasVectorColumn {
+			_, err = kv.db.Exec(`
+				INSERT INTO kv_embeddings (key, text, embedding, created_at)
+				VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+				ON CONFLICT(key) DO UPDATE SET
+					text = excluded.text,
+					embedding = excluded.embedding
+			`, key, text, embBytes)
+		}
 		if err != nil {
 			// Non-fatal
 			return objectInfo, nil

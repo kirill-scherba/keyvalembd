@@ -18,6 +18,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	// Register libsql driver
@@ -35,6 +36,15 @@ type KeyValueEmbd struct {
 	enabled bool
 
 	embedder *Embedder
+
+	// Native libSQL vector index state.
+	vecMu        sync.RWMutex // guards vecCfg, vecColumnOK, vecIndexOK, vecCount
+	vecMigrateMu sync.Mutex   // serialises MigrateVectorIndex
+	vecCfg       VectorIndexConfig
+	vecColumnOK  bool
+	vecIndexOK   bool
+	vecCount     int       // cached number of embeddings
+	vecCountAt   time.Time // when vecCount was measured
 }
 
 // New creates a new KeyValueEmbd, opening or creating the libSQL database at
@@ -86,6 +96,7 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 		db:      db,
 		dbPath:  dbPath,
 		enabled: true,
+		vecCfg:  DefaultVectorIndexConfig(),
 	}
 
 	// Create tables
@@ -93,6 +104,11 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 		db.Close()
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
+
+	// Detect an already-migrated vector column/index. Migration itself is an
+	// explicit step (see MigrateVectorIndex) because building the index can be
+	// slow on large collections.
+	kv.refreshVectorIndexState()
 
 	// Initialise embedder (non-fatal if Ollama unavailable)
 	kv.embedder = NewEmbedder("", "")

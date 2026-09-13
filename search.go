@@ -53,11 +53,35 @@ type kvEmbeddingRow struct {
 }
 
 // SearchByEmbedding performs a cosine similarity search using the given
-// embedding vector against all stored embeddings, returning the top-N results.
+// embedding vector, returning the top-N results.
+//
+// When the native libSQL vector index is available and the collection is large
+// enough, the search is delegated to the index with exact re-ranking of the
+// candidate set. Otherwise an exact scan of all stored embeddings is used.
 func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]SearchResult, error) {
 	if !kv.enabled {
 		return nil, fmt.Errorf("keyvalembd is not enabled")
 	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	if kv.useVectorIndex() {
+		results, err := kv.searchByEmbeddingANN(embedding, limit)
+		if err == nil {
+			return results, nil
+		}
+		// Non-fatal: fall back to the exact scan.
+		log.Printf("keyvalembd: vector index search failed, using scan: %v", err)
+	}
+
+	return kv.searchByEmbeddingScan(embedding, limit)
+}
+
+// searchByEmbeddingScan performs an exact cosine similarity scan over every
+// stored embedding. It is O(N) and is used for small collections or when the
+// native vector index is unavailable.
+func (kv *KeyValueEmbd) searchByEmbeddingScan(embedding []float32, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
