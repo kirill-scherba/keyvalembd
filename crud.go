@@ -125,6 +125,7 @@ func (kv *KeyValueEmbd) SetWithEmbedding(key string, value []byte,
 			log.Printf("keyvalembd: embedding write failed: %v", err)
 			return objectInfo, nil
 		}
+		kv.markIndexDirty()
 	}
 
 	return objectInfo, nil
@@ -141,5 +142,6 @@ func (kv *KeyValueEmbd) Del(keys ...string) (err error) {
 			return fmt.Errorf("delete key %s: %w", key, err)
 		}
 	}
+	kv.markIndexDirty()
 	return nil
 }

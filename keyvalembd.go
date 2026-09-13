@@ -21,9 +21,10 @@ import (
 	"sync"
 	"time"
 
-	// Register libsql driver
-	_ "github.com/tursodatabase/go-libsql"
+	// Register the pure-Go SQLite driver.
+	_ "modernc.org/sqlite"
 
+	"github.com/kirill-scherba/keyvalembd/vecindex"
 	"github.com/kirill-scherba/s3lite"
 	"github.com/kirill-scherba/sqlh"
 )
@@ -37,14 +38,12 @@ type KeyValueEmbd struct {
 
 	embedder *Embedder
 
-	// Native libSQL vector index state.
-	vecMu        sync.RWMutex // guards vecCfg, vecColumnOK, vecIndexOK, vecCount
-	vecMigrateMu sync.Mutex   // serialises MigrateVectorIndex
-	vecCfg       VectorIndexConfig
-	vecColumnOK  bool
-	vecIndexOK   bool
-	vecCount     int       // cached number of embeddings
-	vecCountAt   time.Time // when vecCount was measured
+	// In-process, memory-mapped vector index (see SetVectorIndexDir).
+	vecMu    sync.RWMutex // guards the fields below
+	idxDir   string       // index directory; empty disables the index
+	idx      *vecindex.Index
+	idxDirty bool // database changed since the index was built
+	columnOK bool // embedding_vec column exists
 }
 
 // New creates a new KeyValueEmbd, opening or creating the libSQL database at
@@ -66,12 +65,12 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 		return nil, fmt.Errorf("create db directory %s: %w", dir, err)
 	}
 
-	// Connect to libSQL with WAL mode and busy timeout
+	// Connect with WAL mode and a busy timeout.
 	dsn := fmt.Sprintf(
-		"file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)",
+		"file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)",
 		dbPath,
 	)
-	db, err := sql.Open("libsql", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -86,6 +85,7 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA busy_timeout=5000",
 		"PRAGMA synchronous=NORMAL",
+		"PRAGMA foreign_keys=ON",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
 			// Non-fatal: pragmas may not be supported by all libSQL builds
@@ -96,7 +96,6 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 		db:      db,
 		dbPath:  dbPath,
 		enabled: true,
-		vecCfg:  DefaultVectorIndexConfig(),
 	}
 
 	// Create tables
@@ -105,10 +104,8 @@ func New(dbPath string) (kv *KeyValueEmbd, err error) {
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
-	// Detect an already-migrated vector column/index. Migration itself is an
-	// explicit step (see MigrateVectorIndex) because building the index can be
-	// slow on large collections.
-	kv.refreshVectorIndexState()
+	// Detect which vector column this database has.
+	kv.refreshVectorState()
 
 	// Initialise embedder (non-fatal if Ollama unavailable)
 	kv.embedder = NewEmbedder("", "")
@@ -169,9 +166,6 @@ func (kv *KeyValueEmbd) Vacuum() error {
 
 // createTables creates the required database tables if they do not exist.
 func (kv *KeyValueEmbd) createTables() error {
-	// Try to enable libSQL vector extension; non-fatal if unsupported.
-	_, _ = kv.db.Exec("CREATE EXTENSION IF NOT EXISTS vector")
-
 	// Create tables from struct definitions via sqlh
 	if err := sqlh.Create[KVData](kv.db); err != nil {
 		return fmt.Errorf("create kv_data table: %w", err)

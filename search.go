@@ -5,6 +5,7 @@
 package keyvalembd
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -43,9 +44,9 @@ func (kv *KeyValueEmbd) SearchSemantic(query string, limit int) ([]SearchResult,
 // SearchByEmbedding performs a cosine similarity search using the given
 // embedding vector, returning the top-N results.
 //
-// When the native libSQL vector index is available and the collection is large
-// enough, the search is delegated to the index with exact re-ranking of the
-// candidate set. Otherwise an exact scan of all stored embeddings is used.
+// When an in-process index is configured (SetVectorIndexDir), the search is
+// answered from it: an exact cosine scan over memory-mapped vectors, with no
+// database reads. Otherwise an exact scan of the database is used.
 func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]SearchResult, error) {
 	if !kv.enabled {
 		return nil, fmt.Errorf("keyvalembd is not enabled")
@@ -54,11 +55,9 @@ func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]Sea
 		limit = 10
 	}
 
-	if kv.useVectorIndex() {
-		results, err := kv.searchByEmbeddingANN(embedding, limit)
-		if err == nil {
-			return results, nil
-		}
+	if results, err := kv.searchByEmbeddingIndex(embedding, limit); err == nil {
+		return results, nil
+	} else if !errors.Is(err, errIndexDisabled) {
 		// Non-fatal: fall back to the exact scan.
 		log.Printf("keyvalembd: vector index search failed, using scan: %v", err)
 	}
