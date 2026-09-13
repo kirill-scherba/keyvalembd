@@ -111,39 +111,18 @@ func (kv *KeyValueEmbd) SetWithEmbedding(key string, value []byte,
 
 		embBytes := float32SliceToBytes(emb)
 
-		// Keep the native vector index column in sync when it exists.
-		kv.vecMu.RLock()
-		hasVectorColumn := kv.vecColumnOK
-		kv.vecMu.RUnlock()
-
-		if hasVectorColumn {
-			_, err = kv.db.Exec(`
-				INSERT INTO kv_embeddings (key, text, embedding, embedding_vec, created_at)
-				VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-				ON CONFLICT(key) DO UPDATE SET
-					text = excluded.text,
-					embedding = excluded.embedding,
-					embedding_vec = excluded.embedding_vec
-			`, key, text, embBytes, embBytes)
-			if err != nil {
-				// Dimension mismatch (model changed) or index problem: fall
-				// back to storing the raw embedding only, so the value is
-				// never lost.
-				log.Printf("keyvalembd: vector column write failed, storing raw embedding only: %v", err)
-				hasVectorColumn = false
-			}
-		}
-		if !hasVectorColumn {
-			_, err = kv.db.Exec(`
-				INSERT INTO kv_embeddings (key, text, embedding, created_at)
-				VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-				ON CONFLICT(key) DO UPDATE SET
-					text = excluded.text,
-					embedding = excluded.embedding
-			`, key, text, embBytes)
-		}
-		if err != nil {
-			// Non-fatal
+		// Write to whichever vector column this database has: embedding_vec on
+		// migrated (or freshly created) databases, the legacy embedding column
+		// otherwise. col is an internal constant, never user input.
+		col := kv.vectorColumn()
+		stmt := `INSERT INTO kv_embeddings (key, text, ` + col + `, created_at)
+			VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+			ON CONFLICT(key) DO UPDATE SET
+				text = excluded.text,
+				` + col + ` = excluded.` + col
+		if _, err = kv.db.Exec(stmt, key, text, embBytes); err != nil {
+			// Non-fatal: a failed embedding write must not lose the value.
+			log.Printf("keyvalembd: embedding write failed: %v", err)
 			return objectInfo, nil
 		}
 	}

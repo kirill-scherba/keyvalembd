@@ -5,6 +5,7 @@
 package keyvalembd
 
 import (
+	"database/sql"
 	"math"
 	"math/rand"
 	"path/filepath"
@@ -33,7 +34,7 @@ func insertSynthetic(t *testing.T, kv *KeyValueEmbd, key string, vec []float32) 
 		t.Fatalf("insert kv_data: %v", err)
 	}
 	if _, err := kv.db.Exec(
-		`INSERT OR REPLACE INTO kv_embeddings (key, text, embedding, created_at)
+		`INSERT OR REPLACE INTO kv_embeddings (key, text, embedding_vec, created_at)
 		 VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
 		key, key, float32SliceToBytes(vec),
 	); err != nil {
@@ -42,6 +43,9 @@ func insertSynthetic(t *testing.T, kv *KeyValueEmbd, key string, vec []float32) 
 }
 
 // randomVector returns a deterministic pseudo-random unit-ish vector.
+// testDim matches the F32_BLOB dimension declared by KVEmbedding.
+const testDim = 768
+
 func randomVector(rnd *rand.Rand, dim int) []float32 {
 	v := make([]float32, dim)
 	for i := range v {
@@ -60,7 +64,7 @@ func TestMigrateVectorIndex(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(1))
 	for i := 0; i < 20; i++ {
-		insertSynthetic(t, kv, keyName(i), randomVector(rnd, 32))
+		insertSynthetic(t, kv, keyName(i), randomVector(rnd, testDim))
 	}
 
 	if err := kv.MigrateVectorIndex(); err != nil {
@@ -92,7 +96,7 @@ func TestVectorIndexSearchMatchesScan(t *testing.T) {
 	kv := newTestKV(t)
 
 	const (
-		dim = 64
+		dim = testDim
 		n   = 300
 		k   = 10
 	)
@@ -165,7 +169,7 @@ func TestVectorIndexThresholdFallsBackToScan(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(7))
 	for i := 0; i < 10; i++ {
-		insertSynthetic(t, kv, keyName(i), randomVector(rnd, 32))
+		insertSynthetic(t, kv, keyName(i), randomVector(rnd, testDim))
 	}
 	if err := kv.MigrateVectorIndex(); err != nil {
 		t.Fatalf("MigrateVectorIndex: %v", err)
@@ -187,12 +191,12 @@ func TestVectorIndexThresholdFallsBackToScan(t *testing.T) {
 func TestVectorIndexWriteAndDeletePath(t *testing.T) {
 	kv := newTestKV(t)
 
-	const dim = 32
+	const dim = testDim
 	// Distinctive vector: first component dominates.
 	uniq := make([]float32, dim)
 	uniq[0] = 1
 
-	// Insert before migration so the column dimension is inferred correctly.
+	// Insert before migration so the row exists when the index is built.
 	insertSynthetic(t, kv, "target", uniq)
 
 	if err := kv.MigrateVectorIndex(); err != nil {
@@ -227,7 +231,7 @@ func TestVectorIndexWriteAndDeletePath(t *testing.T) {
 func TestVectorIndexSearchScore(t *testing.T) {
 	kv := newTestKV(t)
 
-	const dim = 16
+	const dim = testDim
 	a := make([]float32, dim)
 	b := make([]float32, dim)
 	for i := 0; i < dim; i++ {
@@ -258,6 +262,136 @@ func TestVectorIndexSearchScore(t *testing.T) {
 	}
 	if ann[1].Score >= ann[0].Score {
 		t.Fatalf("scores not ordered: %f >= %f", ann[1].Score, ann[0].Score)
+	}
+}
+
+// newLegacyKV creates a database with the pre-v0.5.0 schema (an embedding BLOB
+// column, no embedding_vec), fills it with synthetic rows, and opens it with
+// keyvalembd.
+func newLegacyKV(t *testing.T, n, dim int) *KeyValueEmbd {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+
+	raw, err := sql.Open("libsql", "file:"+dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE kv_data (
+			key TEXT PRIMARY KEY NOT NULL,
+			value BLOB NOT NULL,
+			content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+			checksum TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			modified_at TEXT NOT NULL DEFAULT (datetime('now')),
+			metadata TEXT NOT NULL DEFAULT '{}')`,
+		`CREATE TABLE kv_embeddings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			key TEXT NOT NULL UNIQUE,
+			text TEXT NOT NULL DEFAULT '',
+			embedding BLOB,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("legacy schema: %v", err)
+		}
+	}
+
+	rnd := rand.New(rand.NewSource(99))
+	for i := 0; i < n; i++ {
+		key := keyName(i)
+		if _, err := raw.Exec(
+			`INSERT INTO kv_data (key, value) VALUES (?, ?)`, key, []byte("v"),
+		); err != nil {
+			t.Fatalf("legacy kv_data: %v", err)
+		}
+		if _, err := raw.Exec(
+			`INSERT INTO kv_embeddings (key, text, embedding) VALUES (?, ?, ?)`,
+			key, key, float32SliceToBytes(randomVector(rnd, dim)),
+		); err != nil {
+			t.Fatalf("legacy kv_embeddings: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	kv, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New on legacy database: %v", err)
+	}
+	t.Cleanup(kv.Close)
+	return kv
+}
+
+// TestLegacyDatabaseMigration covers the path taken by databases created before
+// v0.5.0: they only have the embedding column and must be migrated, then have
+// that column dropped.
+func TestLegacyDatabaseMigration(t *testing.T) {
+	kv := newLegacyKV(t, 20, testDim)
+
+	if kv.VectorIndexReady() {
+		t.Fatal("vector index reported ready on a legacy database")
+	}
+	if got := kv.vectorColumn(); got != legacyEmbeddingColumn {
+		t.Fatalf("vectorColumn() = %q, want %q", got, legacyEmbeddingColumn)
+	}
+
+	query := randomVector(rand.New(rand.NewSource(7)), testDim)
+	if _, err := kv.SearchByEmbedding(query, 5); err != nil {
+		t.Fatalf("scan search on legacy database: %v", err)
+	}
+
+	if err := kv.MigrateVectorIndex(); err != nil {
+		t.Fatalf("MigrateVectorIndex: %v", err)
+	}
+	if got := kv.vectorColumn(); got != vectorColumnName {
+		t.Fatalf("after migration vectorColumn() = %q, want %q", got, vectorColumnName)
+	}
+
+	var missing int
+	if err := kv.db.QueryRow(
+		`SELECT COUNT(*) FROM kv_embeddings
+		 WHERE embedding IS NOT NULL AND embedding_vec IS NULL`,
+	).Scan(&missing); err != nil {
+		t.Fatalf("count backfill: %v", err)
+	}
+	if missing != 0 {
+		t.Fatalf("%d legacy rows not backfilled", missing)
+	}
+
+	dropped, err := kv.DropLegacyEmbeddingColumn()
+	if err != nil {
+		t.Fatalf("DropLegacyEmbeddingColumn: %v", err)
+	}
+	if !dropped {
+		t.Fatal("legacy column was not dropped")
+	}
+	hasLegacy, err := kv.columnExists(vectorTableName, legacyEmbeddingColumn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLegacy {
+		t.Fatal("legacy column still present after drop")
+	}
+
+	if _, err := kv.SearchByEmbedding(query, 5); err != nil {
+		t.Fatalf("search after dropping the legacy column: %v", err)
+	}
+}
+
+// TestDropLegacyEmbeddingColumnNoop verifies the drop is a no-op on databases
+// that never had the legacy column, and that it refuses to drop when
+// embedding_vec is absent.
+func TestDropLegacyEmbeddingColumnNoop(t *testing.T) {
+	kv := newTestKV(t)
+
+	dropped, err := kv.DropLegacyEmbeddingColumn()
+	if err != nil {
+		t.Fatalf("DropLegacyEmbeddingColumn on fresh database: %v", err)
+	}
+	if dropped {
+		t.Fatal("reported a drop on a database without the legacy column")
 	}
 }
 

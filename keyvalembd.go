@@ -132,14 +132,19 @@ type KVData struct {
 
 // KVEmbedding represents the kv_embeddings table row with sqlh struct tags.
 // Stores embedding vectors for semantic search.
+//
+// The vector lives in a single column, embedding_vec (F32_BLOB). Older
+// databases may still carry a legacy "embedding" BLOB column; the code reads
+// and writes whichever column is present (see vectorColumn), and
+// DropLegacyEmbeddingColumn removes the legacy one once migrated.
 type KVEmbedding struct {
-	_          bool   `db_table_name:"kv_embeddings"`
-	ID         int64  `db:"id" db_key:"primary key autoincrement"`
-	Key        string `db:"key" db_key:"unique"`
-	Text       string `db:"text"`
-	Embedding  []byte `db:"embedding" db_type:"BLOB"`
-	CreatedAt  string `db:"created_at"`
-	_          string `db:"-" db_key:"CONSTRAINT kv_embeddings_ibfk_1 FOREIGN KEY (key) REFERENCES kv_data(key) ON DELETE CASCADE"`
+	_         bool   `db_table_name:"kv_embeddings"`
+	ID        int64  `db:"id" db_key:"primary key autoincrement"`
+	Key       string `db:"key" db_key:"unique"`
+	Text      string `db:"text"`
+	Embedding []byte `db:"embedding_vec" db_type:"F32_BLOB(768)"`
+	CreatedAt string `db:"created_at"`
+	_         string `db:"-" db_key:"CONSTRAINT kv_embeddings_ibfk_1 FOREIGN KEY (key) REFERENCES kv_data(key) ON DELETE CASCADE"`
 }
 
 // Close closes the database connection and releases resources.
@@ -147,6 +152,19 @@ func (kv *KeyValueEmbd) Close() {
 	if kv.db != nil {
 		_ = kv.db.Close()
 	}
+}
+
+// Vacuum rebuilds the database file, reclaiming space freed by deletions. It
+// can take a while on large databases and temporarily requires free disk space
+// roughly equal to the current database size.
+func (kv *KeyValueEmbd) Vacuum() error {
+	if !kv.enabled {
+		return fmt.Errorf("keyvalembd is not enabled")
+	}
+	if _, err := kv.db.Exec("VACUUM"); err != nil {
+		return fmt.Errorf("vacuum: %w", err)
+	}
+	return nil
 }
 
 // createTables creates the required database tables if they do not exist.

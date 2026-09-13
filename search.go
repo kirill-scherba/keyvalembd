@@ -5,12 +5,9 @@
 package keyvalembd
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"sort"
-
-	"github.com/kirill-scherba/sqlh"
 )
 
 // SearchResult represents a single result from a semantic search.
@@ -43,15 +40,6 @@ func (kv *KeyValueEmbd) SearchSemantic(query string, limit int) ([]SearchResult,
 	return kv.SearchByEmbedding(queryEmb, limit)
 }
 
-// kvEmbeddingRow is a lightweight projection of KVEmbedding used by
-// SearchByEmbedding to load only key, text and embedding blob.
-type kvEmbeddingRow struct {
-	_         bool   `db_table_name:"kv_embeddings"`
-	Key       string `db:"key"`
-	Text      string `db:"text"`
-	Embedding []byte `db:"embedding" db_type:"BLOB"`
-}
-
 // SearchByEmbedding performs a cosine similarity search using the given
 // embedding vector, returning the top-N results.
 //
@@ -81,10 +69,26 @@ func (kv *KeyValueEmbd) SearchByEmbedding(embedding []float32, limit int) ([]Sea
 // searchByEmbeddingScan performs an exact cosine similarity scan over every
 // stored embedding. It is O(N) and is used for small collections or when the
 // native vector index is unavailable.
+//
+// The vector column is resolved at runtime (embedding_vec, or the legacy
+// embedding column on databases that have not been migrated), which is why the
+// query is raw SQL rather than sqlh's struct mapping.
 func (kv *KeyValueEmbd) searchByEmbeddingScan(embedding []float32, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+
+	col := kv.vectorColumn()
+	query := fmt.Sprintf(
+		`SELECT key, text, %s FROM %s WHERE %s IS NOT NULL`,
+		col, vectorTableName, col,
+	)
+
+	rows, err := kv.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("scan embeddings: %w", err)
+	}
+	defer rows.Close()
 
 	type scored struct {
 		key   string
@@ -93,20 +97,23 @@ func (kv *KeyValueEmbd) searchByEmbeddingScan(embedding []float32, limit int) ([
 	}
 
 	var scoredResults []scored
-
-	for _, row := range sqlh.ListRange[kvEmbeddingRow](
-		kv.db, 0, "", "", 0,
-		sqlh.IsNotNull("embedding"),
-		func(err error) { log.Printf("keyvalembd: SearchByEmbedding: iterate: %v", err) },
-		context.Background(),
-	) {
-		storedEmb := bytesToFloat32Slice(row.Embedding)
-		score := cosineSimilarity(embedding, storedEmb)
+	for rows.Next() {
+		var (
+			key, text string
+			blob      []byte
+		)
+		if err := rows.Scan(&key, &text, &blob); err != nil {
+			log.Printf("keyvalembd: SearchByEmbedding: scan row: %v", err)
+			continue
+		}
 		scoredResults = append(scoredResults, scored{
-			key:   row.Key,
-			text:  row.Text,
-			score: score,
+			key:   key,
+			text:  text,
+			score: cosineSimilarity(embedding, bytesToFloat32Slice(blob)),
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate embeddings: %w", err)
 	}
 
 	// Sort by score descending
