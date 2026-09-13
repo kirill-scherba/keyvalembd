@@ -11,6 +11,8 @@ keyvalembd is a Go library that provides an S3-like key-value store with vector 
 - Object metadata (content type, checksum, timestamps)
 - Embedding generation via Ollama (embeddinggemma:latest)
 - Semantic / vector search across stored values
+- Optional native libSQL vector index (DiskANN) for large collections, with
+  automatic fallback to the exact cosine scan
 - Implements `s3lite.KeyValueStore` interface for drop-in replacement
 
 ## Architecture

@@ -33,6 +33,13 @@ CREATE TABLE kv_embeddings (
 
 Embedding dimension: 768 (embeddinggemma model).
 
+**Native vector index (optional).** `MigrateVectorIndex()` adds an
+`embedding_vec F32_BLOB(dim)` column and a `kv_embeddings_vec_idx` DiskANN
+index over it. The original `embedding` BLOB column is kept as the source of
+truth for the exact scan and for re-backfilling the vector column. The
+migration is idempotent: it only builds the index once, while the backfill
+step also repairs rows written without the vector column.
+
 **Defaults and timestamp format:** default content type, checksum, metadata, and
 RFC3339 timestamps (`"2006-01-02T15:04:05Z"`) are written by package code rather
 than database defaults. Legacy databases may contain SQLite's `datetime('now')`
@@ -52,7 +59,30 @@ libSQL is not hierarchical, so folder support is implemented at the application 
 
 ## Similarity Search
 
-Cosine similarity is computed in Go (not SQL):
+Two strategies are available and selected automatically by
+`SearchByEmbedding`:
+
+**Native libSQL vector index (ANN).** Used when the database has been migrated
+and the collection holds at least `VectorIndexConfig.Threshold` embeddings
+(default 1500). The search is delegated to libSQL's DiskANN index:
+
+```sql
+SELECT e.key, e.text,
+       vector_distance_cos(e.embedding_vec, vector32(?)) AS dist
+FROM vector_top_k('kv_embeddings_vec_idx', vector32(?), ?) AS t
+JOIN kv_embeddings e ON e.rowid = t.id
+ORDER BY dist
+LIMIT ?
+```
+
+The index returns `limit * Oversample` candidates (default 3x), which are then
+re-ranked by exact cosine distance. This restores recall to ~98-100%. The
+index is maintained by libSQL automatically on INSERT/UPDATE/DELETE, so the
+write path only has to keep `embedding_vec` populated.
+
+**Exact scan (fallback).** For small collections, or when the index is absent
+or disabled, every stored embedding is fetched and compared in Go with
+`cosineSimilarity` (below). It is exact (100% recall) but O(N):
 
 ```go
 func cosineSimilarity(a, b []float32) float64 {
@@ -63,7 +93,25 @@ func cosineSimilarity(a, b []float32) float64 {
 }
 ```
 
-All stored embeddings are fetched and compared in Go. For large collections, SQL-level vector search via libsql vector extension can be added later.
+Measured on a 6845-vector collection (768-dim, embeddinggemma): **22 ms per
+query** with the index versus **124 ms** for the exact scan, recall@1 and
+recall@5 100%, recall@10 ~98%.
+
+### Migration
+
+`MigrateVectorIndex()` is idempotent and:
+
+1. adds the `embedding_vec F32_BLOB(dim)` column if missing,
+2. backfills it from the raw `embedding` BLOB (libSQL accepts the
+   little-endian float32 layout as-is, so no re-encoding is needed),
+3. creates `kv_embeddings_vec_idx` (`libsql_vector_idx(embedding_vec)`) if
+   missing.
+
+Building the index is slow relative to the collection size (about two minutes
+for 6845 vectors), so it is an explicit step rather than work done in `New`.
+The dimension is inferred from existing embeddings, falling back to 768 when
+the database is empty.
+
 
 ## Embedder
 
