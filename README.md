@@ -3,7 +3,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)
 
-**keyvalembd** is a Go library that provides an S3-like key-value store with vector (embedding) search. It uses [libSQL](https://github.com/tursodatabase/libsql) (SQLite-compatible) as the storage backend and optionally generates embeddings via [Ollama](https://ollama.ai/) for semantic search.
+**keyvalembd** is a Go library that provides an S3-like key-value store with vector (embedding) search. It uses a **pure-Go SQLite** driver ([modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)) as the storage backend and optionally generates embeddings via [Ollama](https://ollama.ai/) for semantic search.
 
 The library implements the [`s3lite.KeyValueStore`](https://github.com/kirill-scherba/s3lite) interface, enabling drop-in replacement for code that uses S3-style storage.
 
@@ -12,10 +12,10 @@ The library implements the [`s3lite.KeyValueStore`](https://github.com/kirill-sc
 ## Features
 
 - **S3-like key-value storage** — `Get`, `Set`, `Del`, `List`, `Count` with folder semantics
-- **libSQL backend** — WAL mode, concurrent access, SQL metadata queries
+- **Pure-Go SQLite backend** — WAL mode, foreign keys, SQL metadata queries; builds with `CGO_ENABLED=0`
 - **Object metadata** — content type, MD5 checksum, timestamps, custom key-value metadata
 - **Embedding generation** — automatic vector embeddings via Ollama
-- **Semantic search** — exact cosine scan with an optional native libSQL vector index (DiskANN) for large collections
+- **Semantic search** — exact cosine search, served from an in-process memory-mapped index when configured
 - **Drop-in compatible** — implements `s3lite.KeyValueStore` interface
 - **Folder hierarchy** — S3-style prefix listing with sub-folder collapsing
 
@@ -142,33 +142,26 @@ func main() {
 
 ### Vector Index
 
-Semantic search automatically uses libSQL's native vector index when the
-database has been migrated and the collection is large enough; otherwise it
-falls back to an exact scan. See [docs/DESIGN.md](docs/DESIGN.md) for details.
+Semantic search is exact (100% recall). By default it scans the embeddings in
+the database; when a directory is configured it is answered from an in-process,
+memory-mapped index instead, with no database reads per query:
+
+```go
+kv.SetVectorIndexDir("/path/to/memory.db-idx")   // empty string disables it
+```
+
+The index is a derived artefact: it is built lazily on the first search,
+rebuilt whenever the database changes, and can be regenerated at any time from
+the database. On disk it costs about 3 KB per 768-dim vector.
 
 | Method | Description |
 | -------- | ------------- |
-| `MigrateVectorIndex() error` | Add the `embedding_vec` column and DiskANN index (idempotent; also repairs unindexed rows) |
-| `VectorIndexReady() bool` | Report whether the vector column and index are present and enabled |
-| `SetVectorIndexConfig(cfg VectorIndexConfig)` | Configure enabled/threshold/oversample (defaults: enabled, 1500, 3x) |
-| `VectorIndexConfig() VectorIndexConfig` | Return the current configuration |
+| `SetVectorIndexDir(dir string)` | Enable the in-process index (empty string disables it) |
+| `VectorIndexDir() string` | Return the configured directory |
+| `VectorIndexReady() bool` | Report whether the index is open and up to date |
+| `RebuildVectorIndex() error` | Force a rebuild from the database |
 | `DropLegacyEmbeddingColumn() (bool, error)` | Remove the redundant legacy `embedding` column once `embedding_vec` exists |
 | `Vacuum() error` | Rebuild the database file, reclaiming space freed by deletions |
-
-```go
-// One-off migration (explicit because the index build can take minutes).
-if err := kv.MigrateVectorIndex(); err != nil {
-    log.Fatal(err)
-}
-
-// Optional tuning.
-kv.SetVectorIndexConfig(keyvalembd.VectorIndexConfig{
-    Enabled:    true,
-    Threshold:  1500, // use the index from this many embeddings up
-    Oversample: 3,    // candidates = limit * Oversample, then exact re-rank
-})
-```
-
 
 ### SearchResult
 

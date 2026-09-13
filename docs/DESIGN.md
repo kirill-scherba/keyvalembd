@@ -1,10 +1,16 @@
 # Design & Architecture
 
-## Why libSQL + Embeddings?
+## Why SQLite + Embeddings?
 
-- **libSQL** provides SQL semantics, allowing rich metadata queries alongside key-value storage
+- **SQLite** (pure Go, via modernc.org/sqlite) provides SQL semantics for metadata alongside key-value storage, with no CGO and no platform-specific libraries
 - **Ollama embeddings** enable semantic search without external vector database dependencies
+- **An in-process memory-mapped index** (vecindex) answers semantic queries without reading the database or holding the collection on the Go heap
 - **s3lite interface** ensures compatibility with existing code that uses S3-like storage
+
+The library previously used libSQL for its DiskANN vector index. That index cost
+about 157 KB per vector (a 52x blow-up over the raw data), added 30 ms to every
+insert and took minutes to build, so it was replaced by the in-process index
+above and the driver was swapped for a pure-Go SQLite one.
 
 ## Database Schema
 
@@ -62,64 +68,30 @@ libSQL is not hierarchical, so folder support is implemented at the application 
 
 ## Similarity Search
 
-Two strategies are available and selected automatically by
-`SearchByEmbedding`:
+Two strategies, selected automatically:
 
-**Native libSQL vector index (ANN).** Used when the database has been migrated
-and the collection holds at least `VectorIndexConfig.Threshold` embeddings
-(default 1500). The search is delegated to libSQL's DiskANN index:
+**In-process index (preferred).** When a directory is configured with
+`SetVectorIndexDir`, vectors are written to a compact memory-mapped file
+(`vecindex`) and queries are answered by an exact cosine scan over it. No
+database reads, no SQL, no heap-resident collection, 100% recall. The index is
+built lazily, rebuilt whenever the database changes, and costs about 3 KB per
+768-dim vector.
 
-```sql
-SELECT e.key, e.text,
-       vector_distance_cos(e.embedding_vec, vector32(?)) AS dist
-FROM vector_top_k('kv_embeddings_vec_idx', vector32(?), ?) AS t
-JOIN kv_embeddings e ON e.rowid = t.id
-ORDER BY dist
-LIMIT ?
-```
+**Database scan (fallback).** Without an index directory, every stored
+embedding is fetched and compared in Go. Exact, but O(N) with a database read
+per query.
 
-The index returns `limit * Oversample` candidates (default 3x), which are then
-re-ranked by exact cosine distance. This restores recall to ~98-100%. The
-index is maintained by libSQL automatically on INSERT/UPDATE/DELETE, so the
-write path only has to keep `embedding_vec` populated.
+Measured on a 6848-vector collection (768-dim):
 
-**Exact scan (fallback).** For small collections, or when the index is absent
-or disabled, every stored embedding is fetched and compared in Go with
-`cosineSimilarity` (below). It is exact (100% recall) but O(N):
+| | In-process index | Database scan |
+|---|---|---|
+| Query | 5.1 ms | 124 ms |
+| Index build | 74 ms | — |
+| Disk | 20.4 MB | — |
+| Recall | 100% | 100% |
 
-```go
-func cosineSimilarity(a, b []float32) float64 {
-    dotProduct += float64(a[i]) * float64(b[i])
-    normA += float64(a[i]) * float64(a[i])
-    normB += float64(b[i]) * float64(b[i])
-    return dotProduct / (sqrt(normA) * sqrt(normB))
-}
-```
-
-Measured on a 6845-vector collection (768-dim, embeddinggemma): **22 ms per
-query** with the index versus **124 ms** for the exact scan, recall@1 and
-recall@5 100%, recall@10 ~98%.
-
-### Migration
-
-`MigrateVectorIndex()` is idempotent and:
-
-1. adds the `embedding_vec F32_BLOB(dim)` column if missing,
-2. backfills it from the raw `embedding` BLOB (libSQL accepts the
-   little-endian float32 layout as-is, so no re-encoding is needed),
-3. creates `kv_embeddings_vec_idx` (`libsql_vector_idx(embedding_vec)`) if
-   missing.
-
-Building the index is slow relative to the collection size (about two minutes
-for 6845 vectors), so it is an explicit step rather than work done in `New`.
-The dimension is inferred from existing embeddings, falling back to 768 when
-the database is empty.
-
-Once `embedding_vec` is present and fully backfilled, the redundant legacy
-column can be removed with `DropLegacyEmbeddingColumn()`. It refuses to act
-when `embedding_vec` is missing or not fully backfilled, so it can never drop
-the only copy of the vectors. `Vacuum()` then reclaims the freed space.
-
+For comparison, the libSQL DiskANN index that this replaced needed 118 s to
+build, occupied 1050 MB and answered in 22 ms at ~98% recall.
 
 ## Embedder
 
