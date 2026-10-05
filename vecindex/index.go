@@ -33,7 +33,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -63,9 +62,9 @@ type Index struct {
 	vecMap  []byte
 	keyMap  []byte
 
-	vecs   []float32 // view into vecMap
-	keyOff []uint64  // view into keyMap
-	keyBlob []byte   // view into keyMap
+	vecs    []float32 // view into vecMap
+	keyOff  []uint64  // view into keyMap
+	keyBlob []byte    // view into keyMap
 }
 
 // Hit is a single search result.
@@ -233,7 +232,7 @@ func mmapFile(path string, size int64) ([]byte, *os.File, error) {
 	if size <= 0 {
 		return nil, f, nil
 	}
-	b, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
+	b, err := mapFile(f, size)
 	if err != nil {
 		f.Close()
 		return nil, nil, fmt.Errorf("vecindex: mmap %s: %w", filepath.Base(path), err)
@@ -312,13 +311,13 @@ func (ix *Index) Keys() []string {
 func (ix *Index) Close() error {
 	var firstErr error
 	if ix.vecMap != nil {
-		if err := syscall.Munmap(ix.vecMap); err != nil {
+		if err := unmapFile(ix.vecMap); err != nil {
 			firstErr = err
 		}
 		ix.vecMap = nil
 	}
 	if ix.keyMap != nil {
-		if err := syscall.Munmap(ix.keyMap); err != nil && firstErr == nil {
+		if err := unmapFile(ix.keyMap); err != nil && firstErr == nil {
 			firstErr = err
 		}
 		ix.keyMap = nil
@@ -380,17 +379,22 @@ type candidate struct {
 
 type topKHeap []candidate
 
-func (h topKHeap) Len() int            { return len(h) }
-func (h topKHeap) Less(i, j int) bool  { return h[i].score < h[j].score }
-func (h topKHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *topKHeap) Push(x any)         { *h = append(*h, x.(candidate)) }
-func (h *topKHeap) Pop() any           { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
+func (h topKHeap) Len() int           { return len(h) }
+func (h topKHeap) Less(i, j int) bool { return h[i].score < h[j].score }
+func (h topKHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *topKHeap) Push(x any)        { *h = append(*h, x.(candidate)) }
+func (h *topKHeap) Pop() any          { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
 
 // Small wrappers so the search loop does not pull in container/heap's
 // interface calls at every step.
 func heapPush(h *topKHeap, c candidate) { h.Push(c); siftUp(h, h.Len()-1) }
-func heapPop(h *topKHeap) candidate     { n := h.Len() - 1; h.Swap(0, n); siftDown(h, 0, n); return h.Pop().(candidate) }
-func heapFix(h *topKHeap, i int)        { siftDown(h, i, h.Len()) }
+func heapPop(h *topKHeap) candidate {
+	n := h.Len() - 1
+	h.Swap(0, n)
+	siftDown(h, 0, n)
+	return h.Pop().(candidate)
+}
+func heapFix(h *topKHeap, i int) { siftDown(h, i, h.Len()) }
 
 func siftUp(h *topKHeap, i int) {
 	for i > 0 {
