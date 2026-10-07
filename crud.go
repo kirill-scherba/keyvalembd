@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/kirill-scherba/s3lite"
@@ -101,8 +102,11 @@ func (kv *KeyValueEmbd) SetWithEmbedding(key string, value []byte,
 		return nil, err
 	}
 
-	// Generate embedding if embedder is ready
-	if kv.embedder != nil && kv.embedder.Ready() {
+	// Generate embedding if the embedder is ready and there is something to
+	// embed. Document metadata is stored with an empty text, and asking Ollama to
+	// embed nothing returns an empty vector, which looks like a failure and costs
+	// three retries (about 3.5 seconds) per document.
+	if kv.embedder != nil && kv.embedder.Ready() && strings.TrimSpace(text) != "" {
 		emb, err := kv.embedder.GenerateEmbedding(text)
 		if err != nil {
 			// Non-fatal: embedding generation failure doesn't affect value storage
