@@ -369,8 +369,8 @@ func TestKeyValueEmbd(t *testing.T) {
 
 func TestParseTimestamp(t *testing.T) {
 	tests := []struct {
-		input string
-		wantZero bool
+		input      string
+		wantZero   bool
 		wantFormat string
 	}{
 		{"2026-06-12T15:30:00Z", false, time.RFC3339},

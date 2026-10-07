@@ -109,7 +109,14 @@ func (e *Embedder) checkOllama() error {
 		return err
 	}
 
+	// An exact name wins; otherwise fall back to the untagged name, which is how
+	// people usually write a model ("embeddinggemma" for "embeddinggemma:latest").
 	modelName := strings.SplitN(e.model, ":", 2)[0]
+	for _, m := range models.Models {
+		if m.Name == e.model {
+			return nil
+		}
+	}
 	for _, m := range models.Models {
 		if strings.Contains(m.Name, modelName) {
 			return nil

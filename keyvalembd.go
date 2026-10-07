@@ -222,3 +222,19 @@ func makeObjectInfo(key string, valueLen int, contentType, checksum,
 func computeChecksum(data []byte) string {
 	return fmt.Sprintf("%x", md5.Sum(data))
 }
+
+// SetEmbedder replaces the embedder with one for the given model and Ollama URL.
+// The constructor can only use the built-in defaults, so an application that
+// lets the user choose a model (or that must follow a model rename by a newer
+// Ollama) needs this right after New.
+func (kv *KeyValueEmbd) SetEmbedder(model, ollamaURL string) {
+	kv.embedder = NewEmbedder(model, ollamaURL)
+}
+
+// EmbedderModel reports the model the embedder will use.
+func (kv *KeyValueEmbd) EmbedderModel() string {
+	if kv.embedder == nil {
+		return ""
+	}
+	return kv.embedder.Model()
+}
